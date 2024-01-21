@@ -1,6 +1,8 @@
 import numpy as np
 from numpy import pi as PI
 import scipy.signal as sps
+import cupy as cp
+
 
 def err(mat1, mat2, dec=2):
     mat_err = mat1 - mat2
@@ -25,13 +27,20 @@ def fix_decimals(in_mat, dec=2):
 
 def he(mat):
     # Hermitian of a matrix
-    mat = mat.T
+    mat = np.transpose(mat)
     mat = np.conj(mat)
     return mat
 
 
+def cp_he(mat):
+    # Hermitian of a matrix
+    mat = cp.transpose(mat)
+    mat = cp.conj(mat)
+    return mat
+
+
 def tr(mat):
-    mat = mat.T
+    mat = cp.transpose(mat)
     return mat
 
 

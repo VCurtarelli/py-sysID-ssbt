@@ -17,6 +17,8 @@ import sys
 from multiprocessing import Pool
 import pickle
 import time
+# from numba import jit, njit
+import cupy as cp
 
 
 np.set_printoptions(suppress=True, precision=12, threshold=sys.maxsize)
@@ -206,19 +208,19 @@ def simulation(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
     K = 5
     hp_k = np.zeros(((2*K+1)*n_win_H, nperseg), dtype=complex)
     
-    Xp = np.empty((n_win_Y, (2*K+1)*n_win_H, nperseg), dtype=complex)
-    for k in range(nperseg):
-        for l in range(n_win_Y):
-            x_l = np.empty(((2*K+1) * n_win_H,), dtype = complex)
-            for k_ in range(-K, K+1):
-                k__ = np.mod(k+k_, nperseg)
-                xd_lk = np.zeros((n_win_H,), dtype = complex)
-                for l_ in range(n_win_H):
-                    if l - l_ < 0:
-                        break
-                    xd_lk[l_] = X_lk[l - l_, k__]
-                x_l[np.mod(k_, 2*K+1) * n_win_H:(np.mod(k_, 2*K+1)+1) * n_win_H] = xd_lk
-            Xp[l, :, k] = x_l
+    # Xp = np.empty((n_win_Y, (2*K+1)*n_win_H, nperseg), dtype=complex)
+    # for k in range(nperseg):
+    #     for l in range(n_win_Y):
+    #         x_l = np.empty(((2*K+1) * n_win_H,), dtype = complex)
+    #         for k_ in range(-K, K+1):
+    #             k__ = np.mod(k+k_, nperseg)
+    #             xd_lk = np.zeros((n_win_H,), dtype = complex)
+    #             for l_ in range(n_win_H):
+    #                 if l - l_ < 0:
+    #                     break
+    #                 xd_lk[l_] = X_lk[l - l_, k__]
+    #             x_l[np.mod(k_, 2*K+1) * n_win_H:(np.mod(k_, 2*K+1)+1) * n_win_H] = xd_lk
+    #         Xp[l, :, k] = x_l
             
     V_lk = tr(stft(v_n, window = win_type, nperseg = nperseg))
     V_lk = V_lk[:n_win_Y, :]
@@ -244,18 +246,20 @@ def simulation(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
             'Y_lk': Y_lk,
             'X': X,
             'h_k': h_k,
-            'Xp': Xp,
             'nperseg': nperseg}
     savemat('data.mat', data)
     
+    X_ = np.hstack([X, X, X])
     for k in range(nperseg):
-        Xp_k = Xp[:, :, k]
-        U, S, Vh = np.linalg.svd(Xp_k, full_matrices=False)
-        n = np.linalg.matrix_rank(Xp_k)
+        Xp_k = cp.array(X_[:, (k-K+nperseg)*n_win_H:(k+K+nperseg+1)*n_win_H])
+        U, S, Vh = cp.linalg.svd(Xp_k, full_matrices=False)
+        n = cp.linalg.matrix_rank(Xp_k)
         U_ = U[:, :n]
         S_ = S[:n]
         Vh_ = Vh[:n, :]
-        hp_k[:, k] = (he(Vh_) / S_) @ he(U_) @ Y_lk[:, k]
+        # A_inv = (he(Vh_) / S_) @ he(U_)
+        A_inv = cp.matmul(cp.matmul(cp_he(Vh_), cp.linalg.inv(cp.diag(S_))), cp_he(U_))
+        hp_k[:, k] = cp.matmul(A_inv, Y_lk[:, k])
     data['hp_k'] = hp_k
     get_time('End')
     
@@ -659,7 +663,17 @@ def simulation(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
 #     print('End:', freq_mode, nperseg)
 #     return None
 
-    
+
+# @njit
+def jit_solver(Xp_k_):
+    U, S, Vh = np.linalg.svd(Xp_k_, full_matrices=False)
+    n = np.linalg.matrix_rank(Xp_k_)
+    U_ = U[:, :n]
+    S_ = S[:n]
+    Vh_ = Vh[:n, :]
+    return (np.conj(Vh_.T) / S_) @ np.conj(U_.T)
+
+
 def main():
     freqmodes = [
         'stft',
