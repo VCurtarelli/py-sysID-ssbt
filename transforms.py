@@ -1,25 +1,35 @@
 import numpy as np
 from scipy.fft import fft, ifft
-from scipy.signal import stft, istft
+import scipy.signal as signal
 
 
-def ssbt(x, fs, k0=0.25, **kwargs):
+def stft(x, window='hann', nperseg=32, **kwargs):
+    _, _, X_stft = signal.stft(x, window=window, return_onesided=False, nperseg=nperseg, **kwargs)
+    return X_stft
+
+
+def istft(X, window='hann', nperseg=32, **kwargs):
+    t, xt = signal.istft(X, input_onesided=False, window=window, nperseg=nperseg, **kwargs)
+    return xt
+
+
+def ssbt(x, k0=0.25, window='hann', nperseg=32, **kwargs):
     """
         Single Sideband Transform.
     """
-    freqs, win_ts, X_stft = stft(x, fs, return_onesided=False, **kwargs)
-    X_ssbt = np.sqrt(2) * np.real(np.exp(1j*3*np.pi*k0) * X_stft)
-    return freqs, win_ts, X_ssbt
+    _, _, X_stft = stft(x, window=window, return_onesided=False, nperseg=nperseg, **kwargs)
+    X = np.sqrt(2) * np.real(np.exp(1j*3*np.pi*k0) * X_stft)
+    return X
 
 
-def issbt(X_ssbt, fs, k0=0.25, **kwargs):
+def issbt(X_ssbt, k0=0.25, window='hann', nperseg=32, **kwargs):
     """
         Inverse Single Sideband Transform.
     """
     X_stft = np.sqrt(2) * np.exp(-1j*3*np.pi*k0) * X_ssbt
-    t, xt = istft(X_stft, fs, input_onesided=False, **kwargs)
+    t, xt = istft(X_stft, window=window, input_onesided=False, nperseg=nperseg, **kwargs)
     xt = np.real(xt)
-    return t, xt
+    return xt
 
 
 def rft(xt, k0=0.25):
