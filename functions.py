@@ -34,13 +34,13 @@ def he(mat):
 
 def cp_he(mat):
     # Hermitian of a matrix
-    mat = cp.transpose(mat)
-    mat = cp.conj(mat)
+    mat = np.transpose(mat)
+    mat = np.conj(mat)
     return mat
 
 
 def tr(mat):
-    mat = cp.transpose(mat)
+    mat = np.transpose(mat)
     return mat
 
 
