@@ -30,6 +30,10 @@ def get_time(label):
     if len(timers) > 1:
         show_time(slice(-1,  None))
     
+
+def reset_time():
+    timers.clear()
+    
     
 def show_time(log=None):
     if log is None:
@@ -43,22 +47,28 @@ def show_time(log=None):
     
 
 def sim_parser(comb):
-    gen_data(freq_mode=comb[0], signal_mode= 'load', nperseg =comb[1])
-    show_time()
+    gen_data(SNR=comb[0], K=comb[1])
+    # show_time()
+    print()
     
 
-def gen_data(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
-    print('Stt:', freq_mode.upper(), nperseg)
+def gen_data(SNR: float = 0, K: int = 0, nperseg=32, signal_mode='random', fs=8000):
+    print('Stt:', SNR, K)
+    reset_time()
     get_time('Load')
     """
     Parameters
     ----------
-    freq_mode: str
-        Which to use, STFT or SSBT. Defaults to STFT.
-    sig_mode: str
-        Which signals to use, 'random' or 'load'. Defaults to 'random'.
-    n_per_seg: int
+    SNR: int
+        Signal-to-Noise Ratio *at sensor*.
+    K: str
+        Number of cross-band filters to use.
+    nperseg: int
         Number of samples per window in transforms. Defaults to 32.
+    signal_mode: int
+        How to do signals. To load or to generate random.
+    fs: int
+        Target sampling frequency.
     Returns
     -------
 
@@ -77,15 +87,6 @@ def gen_data(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
     #       RFT         : Real Fourier Transform
     #       SSBT        : Single-SideBand Transform
     #       GEFT        : GEneric Frequency Transform
-    
-    """
-        ------------------
-        - Pre-processing -
-        ------------------
-    """
-    freq_mode = freq_mode.lower()
-    if freq_mode not in ['nssbt', 'stft', 'tssbt']:
-        raise SyntaxError('Invalid frequency mode.')
     
     """
         -------------
@@ -114,12 +115,10 @@ def gen_data(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
     
     dx = variables['delta_x'].item()
     c = variables['c'].item()
-    # fs = variables['fs'].item()
-    fs = 8000
     len_rir = variables['n'].item()
     
     global n_bins, F_lk_star, geft
-    match freq_mode:
+    match SNR:
         case 'nssbt' | 'tssbt':
             n_bins = nperseg
             geft = ssbt
@@ -149,6 +148,7 @@ def gen_data(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
     h_n = np.loadtxt('io_input/rir_dx_.csv', delimiter=',')
     h_n = h_n[0, :].reshape(-1, 1)
     g_n = np.loadtxt('io_input/rir_v2_.csv', delimiter=',')
+    g_n = g_n[0, :].reshape(-1, 1)
     
     global x_n, v_n, r_n
     match signal_mode:
@@ -162,12 +162,13 @@ def gen_data(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
             r_n, samplerate = sf.read('io_input/audio_noise_wgn.flac')
             r_n = resample(r_n, samplerate, fs).reshape(-1, 1)
             h_n = resample(h_n, 16000, fs).reshape(-1, 1)
+            g_n = resample(g_n, 16000, fs).reshape(-1, 1)
         
         case 'random' | _:
-            len_x = 100000
-            x_n = np.random.rand(len_x)
-            v_n = np.random.rand(2 * len_x)
-            r_n = np.random.rand(2 * len_x)
+            len_x = 30000
+            x_n = np.random.randn(len_x)
+            v_n = np.random.randn(2 * len_x)
+            r_n = np.random.randn(2 * len_x)
     
     len_rir = h_n.size
     n_win_H = int(np.ceil((len_rir + nperseg - 1) / noverlap))
@@ -186,7 +187,7 @@ def gen_data(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
         for k2 in range(nperseg):
             phi_kk_n = np.empty((nperseg,), dtype=complex)
             for n in range(nperseg):
-                s = window[:(nperseg-n)] * window[n:] * np.exp(-1j*2*np.pi/nperseg * (k1-k2) * np.arange(nperseg-n))
+                s = window[n:] * window[:(nperseg-n)] * np.exp(-1j*2*np.pi/nperseg * (k1-k2) * np.arange(nperseg-n))
                 s = np.sum(s)
                 phi_kk_n[n] = np.exp(1j*2*np.pi/nperseg * k2 * n) * s
             H_lkk[:, k1, k2] = np.convolve(h_n.reshape(-1), phi_kk_n.reshape(-1))[::noverlap]
@@ -196,85 +197,119 @@ def gen_data(freq_mode: str = 'stft', signal_mode='random', nperseg=32):
     n_win_X = X_lk.shape[0]
     n_win_Y = n_win_X
     
-    X = np.empty((n_win_Y, nperseg*n_win_H), dtype=complex)
-    for l in range(n_win_Y):
-        x_l = np.empty((nperseg*n_win_H,), dtype=complex)
-        for k_ in range(nperseg):
-            xd_lk = np.zeros((n_win_H,), dtype=complex)
-            for l_ in range(n_win_H):
-                xd_lk[l_] = X_lk[l-l_, k_]
-                if l-l_ <= 0:
-                    break
-            x_l[k_*n_win_H:(k_+1)*n_win_H] = xd_lk
-        X[l, :] = x_l
-        
-    K = 5
-    hp_k = np.zeros(((2*K+1)*n_win_H, nperseg), dtype=complex)
-            
+    X = np.zeros((n_win_Y, nperseg*n_win_H), dtype=complex)
+    for l in range(n_win_H):
+        for k in range(nperseg):
+            X[l:, k*n_win_H+l] = X_lk[:(n_win_Y - l), k]
+    
     V_lk = tr(stft(v_n, window = win_type, nperseg = nperseg))
     V_lk = V_lk[:n_win_Y, :]
     
     Y_lk = np.zeros((n_win_Y, nperseg), dtype = complex)
     
     for k in range(nperseg):
-        Y_lk[:, k] = X @ h_k[:, k] + V_lk[:, k]
+        S = X @ h_k[:, k]
+        V = V_lk[:, k]
+        std_S = np.var(S)
+        std_V = np.var(V)
+        S = S / std_S
+        V = V / std_V / 10**(SNR/20)
+        W = V
+        Y_lk[:, k] = S + W
     
-    # Info:
-    #   Finding the solution to hp_k_opt \equiv \min_{h_k} ||y_k - Xp_k hp_k||^2
-    #   Using Singular-Value Decomposition:
-    #       Xp_k = U @ np.diag(S) @ Vh
-    #       U and Vh are singular (inverse = hermitian), S is diagonal of single values
-    #       Therefore, if rank(Xp_k) = min(Xp_k.shape), this produces its inverse
-    #       If rank(Xp_k) < min(Xp_k.shape), this produces the minimum-norm solution to the problem
-    #   See:
-    #       https://numpy.org/doc/stable/reference/generated/numpy.linalg.svd.html
-    #       https://www.physicsforums.com/threads/linear-least-square-method-for-singular-matrices.446868/
     get_time('Calc solution')
+    
+    hp_k = np.zeros(((2 * K + 1) * n_win_H, nperseg), dtype = complex)
+    X_ = np.hstack([X, X, X])
+    for k in range(nperseg):
+        Xp_k = np.array(X_[:, (k-K+nperseg)*n_win_H:(k+K+nperseg+1)*n_win_H])
+        mat = he(Xp_k) @ Xp_k
+        hp_k[:, k] = inv(mat) @ he(Xp_k) @ Y_lk[:, k]
+    get_time('End')
+    
+    d_k = np.zeros((n_win_Y, nperseg), dtype=complex)
+    dp_k = np.zeros((n_win_Y, nperseg), dtype = complex)
+    for k in range(nperseg):
+        d_k[:, k] = X @ h_k[:, k]
+        Xp_k = np.array(X_[:, (k-K+nperseg) * n_win_H:(k+K+nperseg + 1) * n_win_H])
+        dp_k[:, k] = Xp_k @ hp_k[:, k]
+        
     data = {'X_lk': X_lk,
             'V_lk': V_lk,
             'Y_lk': Y_lk,
             'X': X,
             'h_k': h_k,
-            'nperseg': nperseg}
-    
-    X_ = np.hstack([X, X, X])
-    for k in range(nperseg):
-        Xp_k = np.array(X_[:, (k-K+nperseg)*n_win_H:(k+K+nperseg+1)*n_win_H])
-        U, S, Vh = np.linalg.svd(Xp_k, full_matrices=False)
-        n = np.linalg.matrix_rank(Xp_k)
-        U_ = U[:, :n]
-        S_ = S[:n]
-        Vh_ = Vh[:n, :]
-        A_inv = (he(Vh_) / S_) @ he(U_)
-        hp_k[:, k] = np.matmul(A_inv, Y_lk[:, k])
-    data['hp_k'] = hp_k
-    get_time('End')
-    
-    with open('io_output/data.pckl', 'wb') as file:
+            'nperseg': nperseg,
+            'hp_k': hp_k,
+            'd_k': d_k,
+            'dp_k': dp_k,
+            }
+
+    filename = 'io_output/data__SNR_{}__K_{}'.format(round(SNR, 2), K).replace('.', ',')
+    with open(filename+'.pckl', 'wb') as file:
         pickle.dump(data, file)
+    savemat(filename+'.mat', data)
+
+
+def proc_data_s():
+    with open('io_output/data.pckl', 'rb') as file:
+        data = pickle.load(file)
+        d_k = data['d_k']
+        dp_k = data['dp_k']
+        nperseg=data['nperseg']
+    
+    d_n = istft(d_k, nperseg=nperseg)
+    dp_n = istft(dp_k, nperseg=nperseg)
+    
+    d_n_norm = d_n / np.std(d_n)
+    dp_n_norm = dp_n / np.std(dp_n)
+    
+    ERLE = np.var(d_n_norm) / np.var(d_n_norm - dp_n_norm)
+    ERLE = dB(ERLE)
+    print(ERLE)
+    
+    # std_d = np.std(d_n)
+    # std_dp = np.std(dp_n)
+    # print(std_d)
+    # print(std_dp)
+    # print(std_dp/std_d)
+    plt.plot(d_n_norm)
+    plt.plot(dp_n_norm)
+    plt.show()
+    
+
+def proc_data_m():
+    pass
 
 
 def main():
-    freqmodes = [
-        'stft',
-        # 'nssbt',
-        # 'tssbt'
-    ]
+    SNRs = range(-40, 40+1, 5)
+    Ks = range(0, 5+1)
 
-    npersegs = [
-        32,
-        # 64,
-    ]
-
-    combs = [(freqmode, nperseg) for freqmode in freqmodes for nperseg in npersegs]
+    combs = [(SNR, K) for SNR in SNRs for K in Ks]
     ncombs = min(len(combs), 4)
-    parallel = False
-    if parallel:
-        with Pool(ncombs) as p:
-            p.map(sim_parser, combs)
-    else:
-        for comb in combs:
-            sim_parser(comb)
+    
+    data_modes = {
+        1: 'gen',
+        2: 'proc_s',
+        3: 'proc_m'
+    }
+    
+    idx = 1
+    data_mode = data_modes[idx]
+    match data_mode:
+        case 'gen':
+            parallel = False
+            if parallel:
+                with Pool(ncombs) as p:
+                    p.map(sim_parser, combs)
+            else:
+                for comb in combs:
+                    sim_parser(comb)
+        case 'proc_s':
+            proc_data_s()
+        case 'proc_m':
+            proc_data_m()
 
 
 if __name__ == '__main__':

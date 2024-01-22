@@ -10,6 +10,7 @@ def stft(x, window='hann', nperseg=32, **kwargs):
 
 def istft(X, window='hann', nperseg=32, **kwargs):
     t, xt = signal.istft(X, input_onesided=False, window=window, nperseg=nperseg, **kwargs)
+    xt = np.real(xt)
     return xt
 
 
