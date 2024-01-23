@@ -196,6 +196,13 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
                     s2 = window
                     phi_kk_n = np.correlate(s1, s2, mode = 'full') * np.exp(
                         1j * 2 * np.pi / nperseg * k1 * np.arange(-nperseg + 1, nperseg))
+                case 'ssbt':
+                    a1 = 2 * np.pi * k2 / nperseg * np.arange(nperseg)
+                    s1 = window * 1 / np.sqrt(2) * (np.cos(a1) + np.sin(a1))
+                    a2 = 2 * np.pi * k1 / nperseg * np.arange(nperseg)
+                    s2 = window * 1 / np.sqrt(2) * (np.cos(a2) + np.sin(a2))
+                    phi_kk_n = np.correlate(s1, s2, mode = 'full')
+            
             S = np.convolve(h_n.reshape(-1), phi_kk_n.reshape(-1))[::noverlap]
             S = S[:n_win_H]
             H_lkk[:, k1, k2] = S
@@ -221,8 +228,8 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
         V = V_lk[:, k]
         std_S = np.var(S)
         std_V = np.var(V)
-        S = S / std_S
-        V = V / std_V / 10 ** (SNR / 20)
+        S = (S / std_S) if std_S > 0 else S
+        V = (V / std_V / 10 ** (SNR / 20)) if std_V > 0 else V
         W = V
         S_lk[:, k] = S
         Y_lk[:, k] = S + W
@@ -249,8 +256,9 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
         Xp_k = np.array(X_[:, (k - K + nperseg) * n_win_H:(k + K + nperseg + 1) * n_win_H])
         dp_k[:, k] = Xp_k @ hp_k[:, k]
     
-    d_n = igeft(d_k, nperseg = nperseg)
-    dp_n = igeft(dp_k, nperseg = nperseg)
+    d_n = igeft(tr(d_k), nperseg = nperseg)
+    dp_n = igeft(tr(dp_k), nperseg = nperseg)
+    get_time('End')
     data = {'X_lk': X_lk,
             'V_lk': V_lk,
             'Y_lk': Y_lk,
@@ -260,14 +268,15 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
             'd_k': d_k,
             'dp_k': dp_k,
             'd_n': d_n,
-            'dp_n': dp_n
+            'dp_n': dp_n,
+            'time': timers[-1] - timers[0]
             }
     
     filename = 'io_output/data__{}__SNR_{}__K_{}'.format(freq_mode, round(SNR, 2), K).replace('.', ',')
     with open(filename + '.pckl', 'wb') as file:
         pickle.dump(data, file)
     savemat(filename + '.mat', data)
-    get_time('End')
+    # get_time('End')
 
 
 def proc_data_s():
@@ -306,6 +315,7 @@ def proc_data_m(freq_modes, SNRs, Ks):
                     data = pickle.load(file)
                 d_n = data['d_n']
                 dp_n = data['dp_n']
+                dp_n = np.nan_to_num(dp_n)
                 
                 d_n_norm = d_n / np.std(d_n)
                 dp_n_norm = dp_n / np.std(dp_n)
@@ -328,9 +338,9 @@ def proc_data_m(freq_modes, SNRs, Ks):
 
 def main():
     SNRs = range(-40, 40 + 1, 5)
-    Ks = range(0, 3 + 1)
+    Ks = range(0, 5 + 1)
     freq_modes = (
-        # 'ssbt',
+        'ssbt',
         'stft',
     )
     
@@ -343,7 +353,7 @@ def main():
         3: 'proc_m'
     }
     
-    idx = 1
+    idx = 3
     data_mode = data_modes[idx]
     match data_mode:
         case 'gen':
