@@ -171,7 +171,8 @@ def gen_data(SNR: float = 0, K: int = 0, nperseg=32, signal_mode='random', fs=80
             r_n = np.random.randn(2 * len_x)
     
     len_rir = h_n.size
-    n_win_H = int(np.ceil((len_rir + nperseg - 1) / noverlap))
+    n_win_H = int(np.ceil((len_rir + nperseg - 1) / noverlap) + np.ceil(nperseg/noverlap) - 1)
+    h_coefs = np.arange(n_win_H)
     """
         -------------------------------
         - Time-Freq. domain variables -
@@ -185,12 +186,12 @@ def gen_data(SNR: float = 0, K: int = 0, nperseg=32, signal_mode='random', fs=80
     h_k = np.empty((n_win_H*nperseg, nperseg), dtype=complex)
     for k1 in range(nperseg):
         for k2 in range(nperseg):
-            phi_kk_n = np.empty((nperseg,), dtype=complex)
-            for n in range(nperseg):
-                s = window[n:] * window[:(nperseg-n)] * np.exp(-1j*2*np.pi/nperseg * (k1-k2) * np.arange(nperseg-n))
-                s = np.sum(s)
-                phi_kk_n[n] = np.exp(1j*2*np.pi/nperseg * k2 * n) * s
-            H_lkk[:, k1, k2] = np.convolve(h_n.reshape(-1), phi_kk_n.reshape(-1))[::noverlap]
+            s1 = window * np.exp(-1j*2*np.pi/nperseg*np.arange(nperseg)*(k1-k2))
+            s2 = window
+            phi_kk_n = np.correlate(s1, s2, mode='full') * np.exp(1j*2*np.pi/nperseg*k1*np.arange(-nperseg+1, nperseg))
+            S = np.convolve(h_n.reshape(-1), phi_kk_n.reshape(-1))[::noverlap]
+            S = S[:n_win_H]
+            H_lkk[:, k1, k2] = S
             h_k[n_win_H*k2:n_win_H*(k2+1), k1] = H_lkk[:, k1, k2]
     
     X_lk = tr(stft(x_n, window=win_type, nperseg=nperseg))
@@ -206,6 +207,7 @@ def gen_data(SNR: float = 0, K: int = 0, nperseg=32, signal_mode='random', fs=80
     V_lk = V_lk[:n_win_Y, :]
     
     Y_lk = np.zeros((n_win_Y, nperseg), dtype = complex)
+    S_lk = np.zeros((n_win_Y, nperseg), dtype = complex)
     
     for k in range(nperseg):
         S = X @ h_k[:, k]
@@ -215,8 +217,16 @@ def gen_data(SNR: float = 0, K: int = 0, nperseg=32, signal_mode='random', fs=80
         S = S / std_S
         V = V / std_V / 10**(SNR/20)
         W = V
+        S_lk[:, k] = S
         Y_lk[:, k] = S + W
     
+    # s_n_ = istft(tr(S_lk))[nperseg-1:]
+    # s_n = np.convolve(h_n.reshape(-1), x_n.reshape(-1))[:s_n_.size]
+    # print(s_n.shape)
+    # print(s_n_.shape)
+    # plt.plot(s_n/np.std(s_n))
+    # plt.plot(s_n_/np.std(s_n_), alpha=0.5)
+    # plt.show()
     get_time('Calc solution')
     
     hp_k = np.zeros(((2 * K + 1) * n_win_H, nperseg), dtype = complex)
