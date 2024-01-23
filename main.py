@@ -269,6 +269,7 @@ def main():
     combs = [(freqmode, nperseg) for freqmode in freqmodes for nperseg in npersegs]
     ncombs = min(len(combs), 4)
     parallel = False
+    
     if parallel:
         with Pool(ncombs) as p:
             p.map(sim_parser, combs)
