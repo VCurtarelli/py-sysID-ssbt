@@ -1,5 +1,6 @@
 import os
 
+import matplotlib.colors
 import numpy as np
 import scipy.linalg
 from scipy.linalg import inv, det, svd
@@ -46,13 +47,14 @@ def show_time(log=None):
 
 
 def sim_parser(comb):
-    gen_data(freq_mode = comb[0], SNR = comb[1], K = comb[2])
+    gen_data(comb)
     # show_time()
     print()
 
 
-def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, signal_mode='load', fs=8000):
-    print('Stt: Mode = {} | SNR = {:+}dB | K = {}'.format(freq_mode.upper(), SNR, K))
+def gen_data(comb, signal_mode='load', fs=8000):
+    freq_mode, SNR, K, nperseg = comb
+    print('Stt: Mode = {} | SNR = {:+}dB | K = {} | N = {}'.format(freq_mode.upper(), SNR, K, nperseg))
     reset_time()
     get_time('Load')
     """
@@ -131,7 +133,7 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
             igeft = istft
     
     noverlap = nperseg // 2
-    win_type = 'hann'
+    win_type = 'hamming'
     window = signal.get_window(win_type, nperseg)
     
     """
@@ -233,12 +235,6 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
         W = V
         S_lk[:, k] = S
         Y_lk[:, k] = S + W
-    
-    # s_n = igeft(tr(S_lk), window=win_type, nperseg=nperseg)
-    # s_n_ = np.convolve(x_n.reshape(-1), h_n.reshape(-1))
-    # plt.plot(s_n / np.std(s_n))
-    # plt.plot(s_n_ / np.std(s_n_), alpha=0.5)
-    # plt.show()
     get_time('Calc solution')
     
     hp_k = np.zeros(((2 * K + 1) * n_win_H, nperseg), dtype = complex)
@@ -256,8 +252,8 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
         Xp_k = np.array(X_[:, (k - K + nperseg) * n_win_H:(k + K + nperseg + 1) * n_win_H])
         dp_k[:, k] = Xp_k @ hp_k[:, k]
     
-    d_n = igeft(tr(d_k), nperseg = nperseg)
-    dp_n = igeft(tr(dp_k), nperseg = nperseg)
+    d_n = igeft(tr(d_k), nperseg = nperseg, window = win_type)
+    dp_n = igeft(tr(dp_k), nperseg = nperseg, window = win_type)
     get_time('End')
     data = {'X_lk': X_lk,
             'V_lk': V_lk,
@@ -267,50 +263,30 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
             'hp_k': hp_k,
             'd_k': d_k,
             'dp_k': dp_k,
-            'd_n_': np.convolve(x_n.reshape(-1), h_n.reshape(-1)),
             'd_n': d_n,
             'dp_n': dp_n,
-            'time': timers[-1] - timers[0]
+            'time': timers[list(timers.keys())[-1]] - timers[list(timers.keys())[0]]
             }
     
-    filename = 'io_output/data__{}__SNR_{}__K_{}'.format(freq_mode, round(SNR, 2), K).replace('.', ',')
+    name = ['data', freq_mode, '{:.2f}'.format(SNR), '{}'.format(K), '{}'.format(nperseg)]
+    filename = 'io_output/var_data/{}'.format('__'.join(name))
     with open(filename + '.pckl', 'wb') as file:
         pickle.dump(data, file)
     savemat(filename + '.mat', data)
-    # get_time('End')
-
-
-def proc_data_s():
-    with open('io_output/data.pckl', 'rb') as file:
-        data = pickle.load(file)
-        d_n = data['d_n']
-        dp_n = data['dp_n']
     
-    d_n_norm = d_n / np.std(d_n)
-    dp_n_norm = dp_n / np.std(dp_n)
-    
-    ERLE = np.var(d_n_norm) / np.var(d_n_norm - dp_n_norm)
-    ERLE = dB(ERLE)
-    
-    # std_d = np.std(d_n)
-    # std_dp = np.std(dp_n)
-    # print(std_d)
-    # print(std_dp)
-    # print(std_dp/std_d)
-    plt.plot(d_n_norm)
-    plt.plot(dp_n_norm)
-    plt.show()
 
-
-def proc_data_m(freq_modes, SNRs, Ks):
+def proc_data_m(freq_modes, SNRs, Ks, nperseg):
     ERLEs = {}
-    linestyles = ['-', '--']
-    for K in Ks:
-        for idx, freq_mode in enumerate(freq_modes):
+    linestyles = [(0, (4, 2*i)) for i, _ in enumerate(freq_modes)]
+    hsv_colors = [(i/len(Ks), 0.6, 0.8) for i, _ in enumerate(Ks)]
+    linewidths = [1, 2]
+    alphas = [1, 0.5]
+    for K_idx, K in enumerate(Ks):
+        for fm_idx, freq_mode in enumerate(freq_modes):
             ERLE_K = []
-            linestyle = linestyles[idx]
             for SNR in SNRs:
-                filename = 'io_output/data__{}__SNR_{}__K_{}'.format(freq_mode, round(SNR, 2), K).replace('.', ',')
+                name = ['data', freq_mode, '{:.2f}'.format(SNR), '{}'.format(K), '{}'.format(nperseg)]
+                filename = 'io_output/var_data/{}'.format('__'.join(name))
                 with open(filename + '.pckl', 'rb') as file:
                     data = pickle.load(file)
                 d_n = data['d_n']
@@ -319,44 +295,58 @@ def proc_data_m(freq_modes, SNRs, Ks):
                 
                 d_n_norm = d_n / np.std(d_n)
                 dp_n_norm = dp_n / np.std(dp_n)
-                plt.plot(d_n_norm)
-                plt.plot(dp_n_norm, alpha=0.5)
-                plt.show()
                 
                 ERLE = np.var(d_n_norm) / np.var(d_n_norm - dp_n_norm)
                 ERLE = dB(ERLE)
+                # print(ERLE)
                 ERLE_K.append(ERLE)
             key = 'K={}, {}'.format(K, freq_mode.upper())
             ERLEs[key] = ERLE_K
-            plt.plot(SNRs, ERLE_K, label = key, linestyle = linestyle)
+            
+            linestyle = linestyles[fm_idx]
+            color = matplotlib.colors.hsv_to_rgb(hsv_colors[K_idx])
+            linewidth = linewidths[fm_idx]
+            alpha = alphas[fm_idx]
+            plt.plot(SNRs, ERLE_K, label = key, linestyle = linestyle, color = color, linewidth=linewidth, alpha=alpha)
+            
+            data = ['snr, val']
+            for idx, _ in enumerate(SNRs):
+                data.append('{}, {:.6f}'.format(SNRs[idx], ERLE_K[idx]))
+            data = '\n'.join(data)
+            with open('io_output/plots/ERLE__{}__K_{}.csv'.format(freq_mode, K), 'w') as f:
+                f.write(data)
+                f.close()
     
-    with open('io_output/plots.pckl', 'wb') as file:
+    with open('io_output/plots/plots.pckl', 'wb') as file:
         pickle.dump(ERLEs, file)
     
     plt.legend(loc = 'upper left')
-    plt.show()
+    # plt.show()
     
     pass
 
 
 def main():
-    SNRs = range(-40, 40 + 1, 5)
-    Ks = range(0, 5 + 1)
+    SNRs = range(-40, 20 + 1, 5)
+    Ks = range(0, 4 + 1)
     freq_modes = (
         'stft',
         'ssbt',
     )
+    npersegs = (
+        # 32,
+        64,
+    )
     
-    combs = [(freq_mode, SNR, K) for freq_mode in freq_modes for SNR in SNRs for K in Ks]
+    combs = [(freq_mode, SNR, K, nperseg) for freq_mode in freq_modes for SNR in SNRs for K in Ks for nperseg in npersegs]
     ncombs = min(len(combs), 4)
     
     data_modes = {
         1: 'gen',
-        2: 'proc_s',
         3: 'proc_m'
     }
     
-    idx = 1
+    idx = 3
     data_mode = data_modes[idx]
     match data_mode:
         case 'gen':
@@ -367,10 +357,10 @@ def main():
             else:
                 for comb in combs:
                     sim_parser(comb)
-        case 'proc_s':
-            proc_data_s()
         case 'proc_m':
-            proc_data_m(freq_modes, SNRs, Ks)
+            for nperseg in npersegs:
+                proc_data_m(freq_modes, SNRs, Ks, nperseg)
+            plt.show()
 
 
 if __name__ == '__main__':
