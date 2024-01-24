@@ -267,6 +267,7 @@ def gen_data(freq_mode: str = 'stft', SNR: float = 0, K: int = 0, nperseg=32, si
             'hp_k': hp_k,
             'd_k': d_k,
             'dp_k': dp_k,
+            'd_n_': np.convolve(x_n.reshape(-1), h_n.reshape(-1)),
             'd_n': d_n,
             'dp_n': dp_n,
             'time': timers[-1] - timers[0]
@@ -290,7 +291,6 @@ def proc_data_s():
     
     ERLE = np.var(d_n_norm) / np.var(d_n_norm - dp_n_norm)
     ERLE = dB(ERLE)
-    print(ERLE)
     
     # std_d = np.std(d_n)
     # std_dp = np.std(dp_n)
@@ -305,10 +305,10 @@ def proc_data_s():
 def proc_data_m(freq_modes, SNRs, Ks):
     ERLEs = {}
     linestyles = ['-', '--']
-    for idx, freq_mode in enumerate(freq_modes):
-        linestyle = linestyles[idx]
-        for K in Ks:
+    for K in Ks:
+        for idx, freq_mode in enumerate(freq_modes):
             ERLE_K = []
+            linestyle = linestyles[idx]
             for SNR in SNRs:
                 filename = 'io_output/data__{}__SNR_{}__K_{}'.format(freq_mode, round(SNR, 2), K).replace('.', ',')
                 with open(filename + '.pckl', 'rb') as file:
@@ -319,6 +319,9 @@ def proc_data_m(freq_modes, SNRs, Ks):
                 
                 d_n_norm = d_n / np.std(d_n)
                 dp_n_norm = dp_n / np.std(dp_n)
+                plt.plot(d_n_norm)
+                plt.plot(dp_n_norm, alpha=0.5)
+                plt.show()
                 
                 ERLE = np.var(d_n_norm) / np.var(d_n_norm - dp_n_norm)
                 ERLE = dB(ERLE)
@@ -340,8 +343,8 @@ def main():
     SNRs = range(-40, 40 + 1, 5)
     Ks = range(0, 5 + 1)
     freq_modes = (
-        'ssbt',
         'stft',
+        'ssbt',
     )
     
     combs = [(freq_mode, SNR, K) for freq_mode in freq_modes for SNR in SNRs for K in Ks]
@@ -353,7 +356,7 @@ def main():
         3: 'proc_m'
     }
     
-    idx = 3
+    idx = 1
     data_mode = data_modes[idx]
     match data_mode:
         case 'gen':
